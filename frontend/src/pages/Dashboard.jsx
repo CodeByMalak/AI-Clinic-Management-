@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext';
+import React, { useState, useEffect } from 'react';
+import { useAuth, api } from '../context/AuthContext';
 import { 
   LogOut, User, Activity, Users, Shield, Calendar, 
   PlusCircle, Stethoscope, AlertTriangle, FileText, CheckCircle2, 
@@ -16,14 +16,31 @@ const Dashboard = () => {
   const [aiStep, setAiStep] = useState(0);
   const [aiReport, setAiReport] = useState(null);
 
-  // Receptionist Queue Simulation states
-  const [queueList, setQueueList] = useState([
-    { id: 1, name: 'Eleanor Vance', age: 34, reason: 'Annual Wellness Examination', status: 'Waiting', time: '10:15 AM' },
-    { id: 2, name: 'Arthur Pendelton', age: 58, reason: 'Hypertension Follow-Up', status: 'Triaged', time: '10:30 AM' },
-    { id: 3, name: 'Gabriella Rivas', age: 22, reason: 'Acute Bronchial Distress', status: 'With Doctor', time: '9:45 AM' },
-  ]);
+  // Receptionist Queue states (from MERN backend)
+  const [queueList, setQueueList] = useState([]);
   const [newPatientName, setNewPatientName] = useState('');
   const [newPatientReason, setNewPatientReason] = useState('');
+  const [queueLoading, setQueueLoading] = useState(false);
+
+  // Fetch patient queue from MERN backend
+  const fetchQueue = async () => {
+    if (!user || (user.role !== 'Receptionist' && user.role !== 'Admin')) return;
+    setQueueLoading(true);
+    try {
+      const response = await api.get('/queues');
+      if (response.data.success) {
+        setQueueList(response.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch queue:', err.message);
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchQueue();
+  }, [user]);
 
   // Simulating Doctor AI Diagnosis engine
   const handleAiDiagnosis = (e) => {
@@ -77,34 +94,57 @@ const Dashboard = () => {
     }, 3500);
   };
 
-  // Simulating Receptionist intake queue addition
-  const handleAddPatient = (e) => {
+  // Add patient to persistent MongoDB queue
+  const handleAddPatient = async (e) => {
     e.preventDefault();
     if (!newPatientName || !newPatientReason) return;
 
-    const newPatient = {
-      id: queueList.length + 1,
-      name: newPatientName,
-      age: Math.floor(Math.random() * 45) + 18,
-      reason: newPatientReason,
-      status: 'Waiting',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
+    setQueueLoading(true);
+    try {
+      const response = await api.post('/queues', {
+        name: newPatientName,
+        age: Math.floor(Math.random() * 45) + 18, // Auto-generate patient age for intake convenience
+        reason: newPatientReason
+      });
 
-    setQueueList([...queueList, newPatient]);
-    setNewPatientName('');
-    setNewPatientReason('');
+      if (response.data.success) {
+        setQueueList([...queueList, response.data.data]);
+        setNewPatientName('');
+        setNewPatientReason('');
+      }
+    } catch (err) {
+      console.error('Failed to add patient:', err.message);
+      alert(err.response?.data?.message || 'Error inserting patient into live database.');
+    } finally {
+      setQueueLoading(false);
+    }
   };
 
-  // Helper to promote patient queue status
-  const updateQueueStatus = (id) => {
-    setQueueList(queueList.map(item => {
-      if (item.id === id) {
-        const nextStatus = item.status === 'Waiting' ? 'Triaged' : item.status === 'Triaged' ? 'With Doctor' : 'Discharged';
-        return { ...item, status: nextStatus };
+  // Promote patient queue status or discharge them
+  const updateQueueStatus = async (id) => {
+    setQueueLoading(true);
+    try {
+      const response = await api.put(`/queues/${id}/status`);
+      if (response.data.success) {
+        if (response.data.discharged) {
+          // If discharged, filter out from active view list
+          setQueueList(queueList.filter(item => item._id !== id));
+        } else {
+          // If status promoted, update status in current list
+          setQueueList(queueList.map(item => {
+            if (item._id === id) {
+              return { ...item, status: response.data.data.status };
+            }
+            return item;
+          }));
+        }
       }
-      return item;
-    }).filter(item => item.status !== 'Discharged'));
+    } catch (err) {
+      console.error('Failed to update status:', err.message);
+      alert(err.response?.data?.message || 'Failed to update patient triage level.');
+    } finally {
+      setQueueLoading(false);
+    }
   };
 
   return (
@@ -524,7 +564,7 @@ const Dashboard = () => {
                 <div className="space-y-3">
                   {queueList.map((patient) => (
                     <div
-                      key={patient.id}
+                      key={patient._id}
                       className="p-4 rounded-2xl bg-slate-50 hover:bg-slate-100/50 border border-slate-100 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                     >
                       <div className="flex gap-3">
@@ -534,7 +574,7 @@ const Dashboard = () => {
                         <div>
                           <h4 className="text-xs font-bold text-slate-850">{patient.name} <span className="text-[10px] text-slate-400 font-normal">({patient.age} yrs)</span></h4>
                           <p className="text-[11px] text-slate-500 font-medium">{patient.reason}</p>
-                          <span className="text-[9px] text-slate-400 block mt-0.5">Registered at {patient.time}</span>
+                          <span className="text-[9px] text-slate-400 block mt-0.5">Registered at {new Date(patient.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
                       </div>
 
@@ -548,7 +588,7 @@ const Dashboard = () => {
                         </span>
 
                         <button
-                          onClick={() => updateQueueStatus(patient.id)}
+                          onClick={() => updateQueueStatus(patient._id)}
                           className="px-3 py-1.5 rounded-lg bg-clinical-600 hover:bg-clinical-700 text-white font-bold text-[10px] uppercase tracking-wider transition-all active:scale-95"
                         >
                           {patient.status === 'Waiting' ? 'Triage Patient' : patient.status === 'Triaged' ? 'Call Doctor' : 'Discharge'}
