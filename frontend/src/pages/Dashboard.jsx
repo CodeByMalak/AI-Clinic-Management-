@@ -22,6 +22,11 @@ const Dashboard = () => {
   const [newPatientReason, setNewPatientReason] = useState('');
   const [queueLoading, setQueueLoading] = useState(false);
 
+  // Admin Portal states (from MERN backend)
+  const [adminStats, setAdminStats] = useState(null);
+  const [adminLogs, setAdminLogs] = useState([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+
   // Fetch patient queue from MERN backend
   const fetchQueue = async () => {
     if (!user || (user.role !== 'Receptionist' && user.role !== 'Admin')) return;
@@ -38,12 +43,36 @@ const Dashboard = () => {
     }
   };
 
+  // Fetch administrative statistics from MERN backend
+  const fetchAdminStats = async () => {
+    if (!user || user.role !== 'Admin') return;
+    setAdminLoading(true);
+    try {
+      const response = await api.get('/admin/stats');
+      if (response.data.success) {
+        setAdminStats(response.data.data.stats);
+        setAdminLogs(response.data.data.logs);
+      }
+    } catch (err) {
+      console.error('Failed to fetch admin stats:', err.message);
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
   useEffect(() => {
-    fetchQueue();
+    if (user) {
+      if (user.role === 'Receptionist' || user.role === 'Admin') {
+        fetchQueue();
+      }
+      if (user.role === 'Admin') {
+        fetchAdminStats();
+      }
+    }
   }, [user]);
 
-  // Simulating Doctor AI Diagnosis engine
-  const handleAiDiagnosis = (e) => {
+  // Doctor AI Diagnosis engine powered by Gemini
+  const handleAiDiagnosis = async (e) => {
     e.preventDefault();
     if (!patientName || !symptoms) return;
 
@@ -54,44 +83,33 @@ const Dashboard = () => {
     // Dynamic phase loaders for AI Diagnostic Hub
     setTimeout(() => setAiStep(2), 1000);
     setTimeout(() => setAiStep(3), 2200);
-    setTimeout(() => {
-      setAiStep(4);
-      // Generate highly targeted mock response
-      const reportOptions = {
-        'chest pain': {
-          diagnosis: 'Acute Gastric Reflux mimicking Angina',
-          riskLevel: 'Moderate',
-          confidence: '84%',
-          recommendations: 'ECG successfully checked clear. Suggest administering anti-acid blocker (Omeprazole 20mg) and follow-up cardiac enzyme screen as standard protocol.'
-        },
-        'fever': {
-          diagnosis: 'Influenza Type A with Mild Respiratory Involvement',
-          riskLevel: 'Low',
-          confidence: '92%',
-          recommendations: 'Symptomatic therapy, mandatory rest, increase hydration. Administer Oseltamivir 75mg twice daily if within 48h of onset.'
-        },
-      };
-
-      const matchedKey = Object.keys(reportOptions).find(key => 
-        symptoms.toLowerCase().includes(key)
-      );
-
-      const generatedReport = matchedKey ? reportOptions[matchedKey] : {
-        diagnosis: 'Nonspecific Viral Syndrome',
-        riskLevel: 'Low',
-        confidence: '78%',
-        recommendations: 'Increase rest, push oral fluids, evaluate basic vital signs. Monitor temperature peaks and recommend acetaminophen 500mg as needed for pyrexia.'
-      };
-
-      setAiReport({
-        patient: patientName,
-        symptoms: symptoms,
-        timestamp: new Date().toLocaleTimeString(),
-        ...generatedReport
-      });
-      setAiRunning(false);
-      setAiStep(0);
-    }, 3500);
+    
+    setTimeout(async () => {
+      try {
+        const response = await api.post('/ai/diagnose', { patientName, symptoms });
+        if (response.data.success) {
+          const aiData = response.data.data;
+          setAiReport({
+            patient: patientName,
+            symptoms: symptoms,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            diagnosis: aiData.diagnosis,
+            confidence: `${aiData.confidence}%`,
+            riskLevel: aiData.risk,
+            analysis: aiData.analysis,
+            recommendations: aiData.recommendations.join('. '),
+            medications: aiData.medications || [],
+            provider: response.data.provider
+          });
+        }
+      } catch (err) {
+        console.error('Failed to run AI diagnosis:', err.message);
+        alert(err.response?.data?.message || 'Error executing AI symptom evaluation.');
+      } finally {
+        setAiRunning(false);
+        setAiStep(0);
+      }
+    }, 3200);
   };
 
   // Add patient to persistent MongoDB queue
@@ -231,43 +249,51 @@ const Dashboard = () => {
             
             {/* Admin Stats Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              <div className="glass-panel p-5 rounded-2xl border border-slate-200/60 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-clinical-100 text-clinical-600 flex items-center justify-center">
+              <div className="glass-panel p-5 rounded-2xl border border-slate-200/60 flex items-center gap-4 bg-white/40">
+                <div className="w-12 h-12 rounded-xl bg-clinical-100 text-clinical-600 flex items-center justify-center shadow-xxs">
                   <Users className="w-6 h-6" />
                 </div>
                 <div>
-                  <h5 className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Total Faculty</h5>
-                  <p className="text-2xl font-bold text-slate-800">42 Members</p>
+                  <h5 className="text-slate-400 text-xxs font-extrabold uppercase tracking-wider">Total Faculty</h5>
+                  <p className="text-xl font-black text-slate-800">
+                    {adminLoading ? '...' : adminStats ? `${adminStats.totalFaculty} Members` : '0 Members'}
+                  </p>
                 </div>
               </div>
 
-              <div className="glass-panel p-5 rounded-2xl border border-slate-200/60 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-accent-100 text-accent-600 flex items-center justify-center">
-                  <Activity className="w-6 h-6 animate-pulse" />
+              <div className="glass-panel p-5 rounded-2xl border border-slate-200/60 flex items-center gap-4 bg-white/40">
+                <div className="w-12 h-12 rounded-xl bg-clinical-100 text-clinical-500 flex items-center justify-center shadow-xxs">
+                  <Users className="w-6 h-6 text-indigo-500" />
                 </div>
                 <div>
-                  <h5 className="text-slate-400 text-xs font-semibold uppercase tracking-wider">AI API Queries</h5>
-                  <p className="text-2xl font-bold text-slate-800">14,298 calls</p>
+                  <h5 className="text-slate-400 text-xxs font-extrabold uppercase tracking-wider">Patient Registry</h5>
+                  <p className="text-xl font-black text-slate-800">
+                    {adminLoading ? '...' : adminStats ? `${adminStats.activePatients} Patients` : '0 Patients'}
+                  </p>
                 </div>
               </div>
 
-              <div className="glass-panel p-5 rounded-2xl border border-slate-200/60 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center">
+              <div className="glass-panel p-5 rounded-2xl border border-slate-200/60 flex items-center gap-4 bg-white/40">
+                <div className="w-12 h-12 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center shadow-xxs">
                   <Calendar className="w-6 h-6" />
                 </div>
                 <div>
-                  <h5 className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Booked Visits</h5>
-                  <p className="text-2xl font-bold text-slate-800">190 Scheduled</p>
+                  <h5 className="text-slate-400 text-xxs font-extrabold uppercase tracking-wider">Booked Visits</h5>
+                  <p className="text-xl font-black text-slate-800">
+                    {adminLoading ? '...' : adminStats ? `${adminStats.bookedVisits} Scheduled` : '0 Scheduled'}
+                  </p>
                 </div>
               </div>
 
-              <div className="glass-panel p-5 rounded-2xl border border-slate-200/60 flex items-center gap-4">
-                <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center">
-                  <Shield className="w-6 h-6" />
+              <div className="glass-panel p-5 rounded-2xl border border-slate-200/60 flex items-center gap-4 bg-white/40">
+                <div className="w-12 h-12 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shadow-xxs">
+                  <Activity className="w-6 h-6 animate-pulse" />
                 </div>
                 <div>
-                  <h5 className="text-slate-400 text-xs font-semibold uppercase tracking-wider">Access Audits</h5>
-                  <p className="text-2xl font-bold text-slate-800">100% Passed</p>
+                  <h5 className="text-slate-400 text-xxs font-extrabold uppercase tracking-wider">Active Intake Feed</h5>
+                  <p className="text-xl font-black text-slate-800">
+                    {adminLoading ? '...' : adminStats ? `${adminStats.liveQueues} in Queue` : '0 in Queue'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -275,51 +301,55 @@ const Dashboard = () => {
             {/* Core Admin Panel */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
-              <div className="lg:col-span-2 glass-panel p-6 rounded-3xl border border-slate-200/60">
-                <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                  <Database className="w-5 h-5 text-clinical-600" />
+              <div className="lg:col-span-2 glass-panel p-6 rounded-3xl border border-slate-200/60 bg-white/40">
+                <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 font-sans uppercase tracking-wider">
+                  <Database className="w-4 h-4 text-clinical-600" />
                   Database Node Logs (Encrypted JWT Actions)
                 </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs">
                     <thead>
-                      <tr className="border-b border-slate-200 text-slate-400 uppercase tracking-widest">
-                        <th className="pb-3 font-semibold">Security Identifier</th>
-                        <th className="pb-3 font-semibold">User Role</th>
-                        <th className="pb-3 font-semibold">Action Invoked</th>
-                        <th className="pb-3 font-semibold">Timestamp</th>
-                        <th className="pb-3 font-semibold text-right">Encrypted Status</th>
+                      <tr className="border-b border-slate-200 text-slate-400 uppercase tracking-widest text-[9px] font-extrabold">
+                        <th className="pb-3">Security Identifier</th>
+                        <th className="pb-3">User Role</th>
+                        <th className="pb-3">Action Invoked</th>
+                        <th className="pb-3">Timestamp</th>
+                        <th className="pb-3 text-right">Encrypted Status</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-600">
-                      <tr>
-                        <td className="py-3 font-bold text-slate-800">usr_89f0e1a2</td>
-                        <td>Doctor</td>
-                        <td>GET /api/auth/me</td>
-                        <td>10:42:15 AM</td>
-                        <td className="py-3 text-right"><span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-bold">200 OK</span></td>
-                      </tr>
-                      <tr>
-                        <td className="py-3 font-bold text-slate-800">usr_12bc34de</td>
-                        <td>Patient</td>
-                        <td>POST /api/auth/register</td>
-                        <td>10:39:04 AM</td>
-                        <td className="py-3 text-right"><span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-bold">201 CREATED</span></td>
-                      </tr>
-                      <tr>
-                        <td className="py-3 font-bold text-slate-800">usr_f45678ab</td>
-                        <td>Receptionist</td>
-                        <td>POST /api/auth/login</td>
-                        <td>10:35:12 AM</td>
-                        <td className="py-3 text-right"><span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 font-bold">200 OK</span></td>
-                      </tr>
-                      <tr>
-                        <td className="py-3 font-bold text-slate-800">usr_unknown</td>
-                        <td>Unauthorized</td>
-                        <td>GET /api/admin/restricted</td>
-                        <td>10:31:00 AM</td>
-                        <td className="py-3 text-right"><span className="px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-600 font-bold">403 FORBIDDEN</span></td>
-                      </tr>
+                    <tbody className="divide-y divide-slate-100 text-slate-600 font-sans">
+                      {adminLogs.map((log) => (
+                        <tr key={log.id}>
+                          <td className="py-3 font-bold text-slate-800 flex flex-col">
+                            <span>{log.identifier}</span>
+                            <span className="text-[10px] text-slate-400 font-normal">{log.name}</span>
+                          </td>
+                          <td className="py-3">
+                            <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${
+                              log.role === 'Admin' ? 'bg-clinical-50 text-clinical-700 border-clinical-100' :
+                              log.role === 'Doctor' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' :
+                              log.role === 'Receptionist' ? 'bg-purple-50 text-purple-700 border-purple-100' :
+                              'bg-slate-50 text-slate-650 border-slate-200'
+                            }`}>
+                              {log.role}
+                            </span>
+                          </td>
+                          <td className="py-3 font-mono text-[10px] text-slate-500">{log.action}</td>
+                          <td className="py-3 text-slate-500">{log.date} at {log.timestamp}</td>
+                          <td className="py-3 text-right">
+                            <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100 font-black font-mono text-[9px] tracking-wide">
+                              {log.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                      {adminLogs.length === 0 && (
+                        <tr>
+                          <td colSpan="5" className="py-10 text-center text-slate-400 text-xs leading-relaxed">
+                            No logs registered. Initializing security network core...
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -468,16 +498,46 @@ const Dashboard = () => {
                         </div>
                       </div>
 
-                      <div className="p-4 rounded-2xl bg-clinical-50/50 border border-clinical-100/50">
-                        <h5 className="text-xs font-bold text-clinical-800 mb-1 flex items-center gap-1.5">
-                          <FileText className="w-4 h-4 text-clinical-600" />
-                          AI Prescribed Action & Suggestions
-                        </h5>
-                        <p className="text-xs text-slate-600 leading-relaxed font-sans">{aiReport.recommendations}</p>
+                      <div className="p-4 rounded-2xl bg-clinical-50/50 border border-clinical-100/50 space-y-4">
+                        <div>
+                          <h5 className="text-xs font-bold text-clinical-800 mb-1 flex items-center gap-1.5 font-sans">
+                            <Brain className="w-4 h-4 text-clinical-600 animate-pulse" />
+                            Clinical Analysis & Physiological Insights
+                          </h5>
+                          <p className="text-xs text-slate-600 leading-relaxed font-sans">{aiReport.analysis || "No analytical notes compiled."}</p>
+                        </div>
+                        
+                        {aiReport.medications && aiReport.medications.length > 0 && (
+                          <div className="pt-3 border-t border-slate-200/50">
+                            <h5 className="text-xs font-bold text-clinical-800 mb-2.5 flex items-center gap-1.5 font-sans">
+                              <Pill className="w-4 h-4 text-clinical-600" />
+                              AI Diagnostic Prescription Cabinet
+                            </h5>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {aiReport.medications.map((med, index) => (
+                                <div key={index} className="p-2.5 rounded-xl bg-white border border-slate-100 shadow-xxs">
+                                  <div className="flex justify-between items-start mb-0.5">
+                                    <span className="text-xs font-black text-slate-800 leading-tight">{med.name}</span>
+                                    <span className="text-[9px] font-bold text-clinical-600 uppercase tracking-wide shrink-0 ml-2">{med.purpose}</span>
+                                  </div>
+                                  <span className="text-[10px] text-slate-500 block leading-normal">{med.instructions}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="pt-3 border-t border-slate-200/50">
+                          <h5 className="text-xs font-bold text-clinical-800 mb-1 flex items-center gap-1.5 font-sans">
+                            <FileText className="w-4 h-4 text-clinical-600" />
+                            AI Recovery Directives & Care Plan
+                          </h5>
+                          <p className="text-xs text-slate-600 leading-relaxed font-sans">{aiReport.recommendations}</p>
+                        </div>
                       </div>
 
                       <p className="text-[10px] text-slate-400 italic text-center">
-                        Report generated at {aiReport.timestamp}. Clinician review required before final pharmaceutical administration.
+                        Report compiled by <span className="font-bold text-clinical-600">{aiReport.provider || "MediFlow AI Gateway"}</span> at {aiReport.timestamp}. Clinician review required.
                       </p>
                     </div>
                   ) : (
