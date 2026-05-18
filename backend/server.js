@@ -96,13 +96,8 @@ let server = startServer(PORT);
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err, promise) => {
-  console.log(`\x1b[31m%s\x1b[0m`, `Error: ${err.message}`);
+  console.error(`\x1b[31m%s\x1b[0m`, `Unhandled Rejection: ${err.message}`);
+  // Gracefully shutdown the server
   server.close(() => process.exit(1));
 });
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err, promise) => {
-  console.log(`\x1b[31m%s\x1b[0m`, `Error: ${err.message}`);
-  // Close server & exit process
-  server.close(() => process.exit(1));
-});
