@@ -1,18 +1,5 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-
-// Helper to sanitize JSON response from Gemini (removes markdown code blocks if generated)
-const cleanJsonResponse = (text) => {
-  let cleaned = text.trim();
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.substring(7);
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.substring(3);
-  }
-  if (cleaned.endsWith('```')) {
-    cleaned = cleaned.substring(0, cleaned.length - 3);
-  }
-  return cleaned.trim();
-};
+const { cleanJsonResponse } = require('../utils/stringSanitizer');
 
 // @desc    Perform clinical symptom evaluation using Gemini
 // @route   POST /api/ai/diagnose

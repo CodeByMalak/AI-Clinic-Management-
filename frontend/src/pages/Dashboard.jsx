@@ -27,9 +27,19 @@ const Dashboard = () => {
   const [adminLogs, setAdminLogs] = useState([]);
   const [adminLoading, setAdminLoading] = useState(false);
 
+  // Patient / Doctor Dynamic Appointments states (from MERN backend)
+  const [doctorsList, setDoctorsList] = useState([]);
+  const [appointmentsList, setAppointmentsList] = useState([]);
+  const [selectedDoctor, setSelectedDoctor] = useState('');
+  const [appointmentDate, setAppointmentDate] = useState('');
+  const [appointmentTimeSlot, setAppointmentTimeSlot] = useState('');
+  const [appointmentReason, setAppointmentReason] = useState('');
+  const [appointmentNotes, setAppointmentNotes] = useState('');
+  const [appointmentLoading, setAppointmentLoading] = useState(false);
+
   // Fetch patient queue from MERN backend
   const fetchQueue = async () => {
-    if (!user || (user.role !== 'Receptionist' && user.role !== 'Admin')) return;
+    if (!user || (user.role !== 'Receptionist' && user.role !== 'Admin' && user.role !== 'Doctor')) return;
     setQueueLoading(true);
     try {
       const response = await api.get('/queues');
@@ -60,13 +70,128 @@ const Dashboard = () => {
     }
   };
 
+  // Fetch active doctor profiles
+  const fetchDoctors = async () => {
+    try {
+      const response = await api.get('/auth/doctors');
+      if (response.data.success) {
+        setDoctorsList(response.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch clinical doctors:', err.message);
+    }
+  };
+
+  // Fetch active appointments (filters automatically based on role/auth on backend)
+  const fetchAppointments = async () => {
+    if (!user || (user.role !== 'Patient' && user.role !== 'Doctor')) return;
+    setAppointmentLoading(true);
+    try {
+      const response = await api.get('/appointments');
+      if (response.data.success) {
+        setAppointmentsList(response.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch appointments:', err.message);
+    } finally {
+      setAppointmentLoading(false);
+    }
+  };
+
+  // Submit new appointment booking
+  const handleBookAppointment = async (e) => {
+    e.preventDefault();
+    if (!selectedDoctor || !appointmentDate || !appointmentTimeSlot || !appointmentReason) {
+      alert('Please fill out all required fields');
+      return;
+    }
+
+    setAppointmentLoading(true);
+    try {
+      const response = await api.post('/appointments', {
+        doctor: selectedDoctor,
+        date: appointmentDate,
+        timeSlot: appointmentTimeSlot,
+        reason: appointmentReason,
+        notes: appointmentNotes
+      });
+
+      if (response.data.success) {
+        alert('Appointment successfully booked and queued!');
+        // Reset form
+        setSelectedDoctor('');
+        setAppointmentDate('');
+        setAppointmentTimeSlot('');
+        setAppointmentReason('');
+        setAppointmentNotes('');
+        // Re-fetch appointments
+        fetchAppointments();
+      }
+    } catch (err) {
+      console.error('Failed to book appointment:', err.message);
+      alert(err.response?.data?.message || 'Error occurred while scheduling appointment.');
+    } finally {
+      setAppointmentLoading(false);
+    }
+  };
+
+  // Cancel an appointment booking
+  const handleCancelAppointment = async (id) => {
+    if (!window.confirm('Are you sure you want to cancel this appointment?')) return;
+    setAppointmentLoading(true);
+    try {
+      const response = await api.delete(`/appointments/${id}`);
+      if (response.data.success) {
+        // Update local list to represent cancel
+        setAppointmentsList(appointmentsList.map(app => {
+          if (app._id === id) {
+            return { ...app, status: 'Cancelled' };
+          }
+          return app;
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to cancel appointment:', err.message);
+      alert(err.response?.data?.message || 'Error cancelling appointment');
+    } finally {
+      setAppointmentLoading(false);
+    }
+  };
+
+  // Update appointment status (for Doctor confirms / completions)
+  const handleUpdateAppointmentStatus = async (id, status) => {
+    setAppointmentLoading(true);
+    try {
+      const response = await api.put(`/appointments/${id}/status`, { status });
+      if (response.data.success) {
+        setAppointmentsList(appointmentsList.map(app => {
+          if (app._id === id) {
+            return { ...app, status: response.data.data.status };
+          }
+          return app;
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to update appointment status:', err.message);
+      alert(err.response?.data?.message || 'Failed to update appointment status.');
+    } finally {
+      setAppointmentLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (user) {
-      if (user.role === 'Receptionist' || user.role === 'Admin') {
+      if (user.role === 'Receptionist' || user.role === 'Admin' || user.role === 'Doctor') {
         fetchQueue();
       }
       if (user.role === 'Admin') {
         fetchAdminStats();
+      }
+      if (user.role === 'Patient' || user.role === 'Doctor') {
+        fetchAppointments();
+      }
+      if (user.role === 'Patient') {
+        fetchDoctors();
       }
     }
   }, [user]);
@@ -555,6 +680,154 @@ const Dashboard = () => {
               </div>
 
             </div>
+
+            {/* Dynamic Consultation & Appointment Integration */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
+              
+              {/* Consultation Intake Queue */}
+              <div className="glass-panel p-6 rounded-3xl border border-slate-200/60 shadow-glass">
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <Clock className="w-5 h-5 text-clinical-500 animate-spin" style={{ animationDuration: '4s' }} />
+                      Consultation Queue
+                    </h3>
+                    <p className="text-xs text-slate-400">Patients routed to your office. Click 'Consult' to evaluate their symptoms.</p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-clinical-50 text-clinical-700 text-xxs font-black tracking-widest uppercase">
+                    {queueList.filter(p => p.status !== 'Waiting').length} Routed
+                  </span>
+                </div>
+
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                  {queueList.filter(p => p.status !== 'Waiting').map((patient) => (
+                    <div
+                      key={patient._id}
+                      className="p-3.5 rounded-2xl bg-white border border-slate-100 flex items-center justify-between gap-4 shadow-xxs hover:border-clinical-200 transition-all"
+                    >
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800">{patient.name} <span className="text-[10px] text-slate-400 font-normal">({patient.age} yrs)</span></h4>
+                        <p className="text-[11px] text-slate-500 leading-normal font-medium">{patient.reason}</p>
+                        <span className={`inline-block px-2 py-0.5 mt-1 rounded text-[8px] font-black uppercase tracking-wider ${
+                          patient.status === 'Triaged' ? 'bg-purple-50 text-purple-700 border border-purple-100' : 'bg-emerald-50 text-emerald-700 border border-emerald-100 animate-pulse'
+                        }`}>
+                          {patient.status}
+                        </span>
+                      </div>
+                      
+                      <button
+                        onClick={() => {
+                          setPatientName(patient.name);
+                          // Auto focus on description
+                          const element = document.querySelector('textarea[placeholder*="Patient presents"]');
+                          if (element) {
+                            element.focus();
+                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }
+                        }}
+                        className="px-3.5 py-2 rounded-xl bg-clinical-50 hover:bg-clinical-100 text-clinical-700 hover:text-clinical-800 font-bold text-[10px] uppercase tracking-wider transition-all border border-clinical-100/50"
+                      >
+                        Consult
+                      </button>
+                    </div>
+                  ))}
+                  {queueList.filter(p => p.status !== 'Waiting').length === 0 && (
+                    <div className="text-center py-10">
+                      <div className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center mx-auto mb-3 text-slate-400">
+                        <Users className="w-5 h-5" />
+                      </div>
+                      <p className="text-slate-400 text-xs">No patients currently routed. Intake desk is triaging new arrivals.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Doctor's Appointments Schedule */}
+              <div className="glass-panel p-6 rounded-3xl border border-slate-200/60 shadow-glass">
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-clinical-500" />
+                      Appointments Registry
+                    </h3>
+                    <p className="text-xs text-slate-400">Manage pending and confirmed visits booked on your profile.</p>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-clinical-50 text-clinical-700 text-xxs font-black tracking-widest uppercase">
+                    {appointmentsList.filter(a => a.status !== 'Cancelled').length} Booked
+                  </span>
+                </div>
+
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                  {appointmentsList.map((app) => (
+                    <div
+                      key={app._id}
+                      className="p-3.5 rounded-2xl bg-white border border-slate-100 flex items-center justify-between gap-4 shadow-xxs"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-xs font-bold text-slate-800 truncate">Patient: {app.patient?.name}</h4>
+                          <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                            app.status === 'Pending' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
+                            app.status === 'Confirmed' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
+                            app.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                            'bg-slate-50 text-slate-550 border border-slate-200'
+                          }`}>
+                            {app.status}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 font-medium truncate mt-0.5">{app.reason}</p>
+                        <span className="text-[9px] text-slate-400 block font-mono mt-0.5">
+                          {new Date(app.date).toLocaleDateString()} at {app.timeSlot}
+                        </span>
+                      </div>
+
+                      {app.status === 'Pending' && (
+                        <div className="flex gap-1 shrink-0">
+                          <button
+                            onClick={() => handleUpdateAppointmentStatus(app._id, 'Confirmed')}
+                            className="px-2.5 py-1.5 rounded-lg bg-clinical-600 hover:bg-clinical-700 text-white font-bold text-[9px] uppercase tracking-wider transition-all"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => handleUpdateAppointmentStatus(app._id, 'Cancelled')}
+                            className="px-2.5 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold text-[9px] uppercase tracking-wider transition-all"
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      )}
+                      
+                      {app.status === 'Confirmed' && (
+                        <button
+                          onClick={() => {
+                            setPatientName(app.patient?.name);
+                            handleUpdateAppointmentStatus(app._id, 'Completed');
+                            const element = document.querySelector('textarea[placeholder*="Patient presents"]');
+                            if (element) {
+                              element.focus();
+                            }
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[9px] uppercase tracking-wider transition-all shrink-0"
+                        >
+                          Complete & Diagn
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {appointmentsList.length === 0 && (
+                    <div className="text-center py-10">
+                      <div className="w-10 h-10 bg-slate-50 border border-slate-100 rounded-xl flex items-center justify-center mx-auto mb-3 text-slate-400">
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                      <p className="text-slate-400 text-xs">No active appointments scheduled on your profile.</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </div>
+
           </div>
         )}
 
@@ -707,66 +980,158 @@ const Dashboard = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               
-              {/* Doctor consult list */}
-              <div className="lg:col-span-2 glass-panel p-6 rounded-3xl border border-slate-200/60 shadow-glass">
-                <h3 className="text-lg font-bold text-slate-800 mb-1.5">My Health Record</h3>
-                <p className="text-xs text-slate-400 mb-6">Overview of your active records, diagnostic tests, and past visits.</p>
+              {/* Dynamic Appointment Scheduler Form */}
+              <div className="glass-panel p-6 rounded-3xl border border-slate-200/60 shadow-glass">
+                <h3 className="text-lg font-bold text-slate-800 mb-1.5 flex items-center gap-1.5">
+                  <PlusCircle className="w-5 h-5 text-clinical-500" />
+                  Schedule Appointment
+                </h3>
+                <p className="text-xs text-slate-400 mb-6">Book a new consultation with one of our specialized medical faculty members.</p>
 
-                <div className="space-y-4">
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <span className="text-[9px] font-black text-clinical-600 uppercase tracking-widest block mb-0.5">Automated Diagnosis Result</span>
-                        <h4 className="text-xs font-bold text-slate-800">Mild Influenza Assessment</h4>
-                      </div>
-                      <span className="px-2 py-0.5 rounded text-[8px] font-bold bg-emerald-50 text-emerald-700 tracking-wide uppercase">Evaluated by Doctor AI</span>
-                    </div>
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      Symptom parsing matched influenza viral markers. Advised: Oseltamivir 75mg, hydration, 5 days isolation.
-                    </p>
+                <form onSubmit={handleBookAppointment} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-xxs font-bold text-slate-400 uppercase tracking-widest block">Select Specialist</label>
+                    <select
+                      required
+                      value={selectedDoctor}
+                      onChange={(e) => setSelectedDoctor(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 text-xs focus:outline-none focus:border-clinical-500 focus:ring-4 focus:ring-clinical-500/10 transition-all bg-white"
+                    >
+                      <option value="">-- Choose a Doctor --</option>
+                      {doctorsList.map((doc) => (
+                        <option key={doc._id} value={doc._id}>
+                          {doc.name} ({doc.specialization})
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100">
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <span className="text-[9px] font-black text-purple-600 uppercase tracking-widest block mb-0.5">Physical Intake</span>
-                        <h4 className="text-xs font-bold text-slate-800">Wellness & Biometric Intake screening</h4>
-                      </div>
-                      <span className="px-2 py-0.5 rounded text-[8px] font-bold bg-slate-200 text-slate-600 tracking-wide uppercase">Clinic Visit</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xxs font-bold text-slate-400 uppercase tracking-widest block">Date</label>
+                      <input
+                        type="date"
+                        required
+                        value={appointmentDate}
+                        onChange={(e) => setAppointmentDate(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 text-xs focus:outline-none focus:border-clinical-500 focus:ring-4 focus:ring-clinical-500/10 transition-all bg-white"
+                      />
                     </div>
-                    <p className="text-[11px] text-slate-500 leading-relaxed">
-                      Blood pressure: 120/80 mmHg, Pulse: 72 bpm, Height/Weight within healthy range. Next general check-up due in 12 months.
-                    </p>
+                    <div className="space-y-1">
+                      <label className="text-xxs font-bold text-slate-400 uppercase tracking-widest block">Time Slot</label>
+                      <input
+                        type="time"
+                        required
+                        value={appointmentTimeSlot}
+                        onChange={(e) => setAppointmentTimeSlot(e.target.value)}
+                        className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 text-xs focus:outline-none focus:border-clinical-500 focus:ring-4 focus:ring-clinical-500/10 transition-all bg-white"
+                      />
+                    </div>
                   </div>
-                </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xxs font-bold text-slate-400 uppercase tracking-widest block">Reason for Visit</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Annual checkup, fever, etc."
+                      value={appointmentReason}
+                      onChange={(e) => setAppointmentReason(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 text-xs focus:outline-none focus:border-clinical-500 focus:ring-4 focus:ring-clinical-500/10 transition-all bg-white"
+                    />
+                  </div>
+                  
+                  <div className="space-y-1">
+                    <label className="text-xxs font-bold text-slate-400 uppercase tracking-widest block">Extra Notes (Optional)</label>
+                    <textarea
+                      rows="2"
+                      placeholder="Any pre-existing conditions..."
+                      value={appointmentNotes}
+                      onChange={(e) => setAppointmentNotes(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 text-slate-800 text-xs focus:outline-none focus:border-clinical-500 focus:ring-4 focus:ring-clinical-500/10 transition-all bg-white resize-none"
+                    ></textarea>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={appointmentLoading}
+                    className="w-full py-2.5 bg-clinical-600 hover:bg-clinical-700 active:scale-95 text-white font-bold text-xs rounded-xl uppercase tracking-wider shadow-lg shadow-clinical-600/10 flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <Send className="w-4 h-4" />
+                    Book Appointment
+                  </button>
+                </form>
               </div>
 
-              {/* Digital Medicine cabinet */}
-              <div className="glass-panel p-6 rounded-3xl border border-slate-200/60 shadow-glass">
-                <h3 className="text-lg font-bold text-slate-800 mb-1 flex items-center gap-1.5">
-                  <Pill className="w-5 h-5 text-accent-500 animate-bounce" />
-                  Prescriptions
-                </h3>
-                <p className="text-xs text-slate-400 mb-5 leading-relaxed">
-                  Digital pharmacy cabinet synchronizing prescribed meds from active consulting physicians.
-                </p>
-
-                <div className="space-y-3">
-                  <div className="p-3.5 rounded-2xl bg-emerald-50/40 border border-emerald-100/50 flex justify-between items-center">
-                    <div>
-                      <h4 className="text-xs font-bold text-emerald-800">Omeprazole 20mg</h4>
-                      <p className="text-[10px] text-emerald-600">Once daily before breakfast</p>
-                    </div>
-                    <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[8px] font-extrabold uppercase">Refill Ready</span>
+              {/* My Appointments List */}
+              <div className="lg:col-span-2 glass-panel p-6 rounded-3xl border border-slate-200/60 shadow-glass flex flex-col">
+                <div className="flex justify-between items-center mb-6">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                      <Calendar className="w-5 h-5 text-clinical-500" />
+                      My Appointments
+                    </h3>
+                    <p className="text-xs text-slate-400">Track and manage your scheduled clinical visits.</p>
                   </div>
+                  <span className="px-2.5 py-1 rounded-full bg-clinical-50 text-clinical-700 text-xxs font-black tracking-widest uppercase">
+                    {appointmentsList.length} Total
+                  </span>
+                </div>
 
-                  <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex justify-between items-center">
-                    <div>
-                      <h4 className="text-xs font-bold text-slate-700">Amoxicillin 500mg</h4>
-                      <p className="text-[10px] text-slate-500">Three times daily for 7 days</p>
+                <div className="space-y-3 flex-1 max-h-[500px] overflow-y-auto pr-1">
+                  {appointmentsList.map((app) => (
+                    <div
+                      key={app._id}
+                      className="p-4 rounded-2xl bg-white border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xxs hover:shadow-sm transition-all"
+                    >
+                      <div className="flex gap-3 items-start sm:items-center min-w-0">
+                        <div className="w-10 h-10 shrink-0 rounded-xl bg-clinical-50 text-clinical-600 flex items-center justify-center font-bold text-xs border border-clinical-100">
+                          {app.doctor?.name ? app.doctor.name.replace('Dr. ', '').substring(0,2).toUpperCase() : 'DR'}
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-bold text-slate-800 truncate">{app.doctor?.name} <span className="text-[10px] text-slate-400 font-normal">({app.doctor?.specialization})</span></h4>
+                          <p className="text-xs text-slate-500 font-medium truncate mb-0.5">{app.reason}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] text-slate-400 font-mono bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">
+                              {new Date(app.date).toLocaleDateString()} at {app.timeSlot}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                              app.status === 'Pending' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
+                              app.status === 'Confirmed' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
+                              app.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
+                              'bg-slate-50 text-slate-550 border border-slate-200'
+                            }`}>
+                              {app.status}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center">
+                        {app.status !== 'Cancelled' && app.status !== 'Completed' && (
+                          <button
+                            onClick={() => handleCancelAppointment(app._id)}
+                            disabled={appointmentLoading}
+                            className="px-3 py-1.5 rounded-lg bg-white border border-rose-200 hover:bg-rose-50 hover:border-rose-300 text-rose-600 font-bold text-[10px] uppercase tracking-wider transition-all active:scale-95 disabled:opacity-50"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
                     </div>
-                    <span className="px-2 py-0.5 rounded bg-slate-250 text-slate-500 text-[8px] font-extrabold uppercase">Completed</span>
-                  </div>
+                  ))}
+                  
+                  {appointmentsList.length === 0 && (
+                    <div className="text-center py-12 flex flex-col items-center justify-center h-full">
+                      <div className="w-12 h-12 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center mb-4 text-slate-300">
+                        <Calendar className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-700 mb-1">No Appointments Booked</h4>
+                      <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+                        You don't have any upcoming or past clinical visits. Use the scheduler on the left to book a new consultation.
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 

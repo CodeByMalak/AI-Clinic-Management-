@@ -1,12 +1,5 @@
-const jwt = require('jsonwebtoken');
 const User = require('../models/userModel');
-
-// Generate JWT Token
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'mediflow_ai_jwt_secret_token_key_2026_clinic', {
-    expiresIn: process.env.JWT_EXPIRE || '30d',
-  });
-};
+const generateToken = require('../utils/generateToken');
 
 // @desc    Register a new user
 // @route   POST /api/auth/register
@@ -170,8 +163,30 @@ const getMe = async (req, res) => {
   }
 };
 
+// @desc    Get all active doctor profiles
+// @route   GET /api/auth/doctors
+// @access  Private
+const getDoctors = async (req, res) => {
+  try {
+    const doctors = await User.find({ role: 'Doctor' }).select('name specialization email phoneNumber');
+    res.status(200).json({
+      success: true,
+      count: doctors.length,
+      data: doctors,
+    });
+  } catch (error) {
+    console.error('Get Doctors Error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error while retrieving clinical doctors list.',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   registerUser,
   loginUser,
   getMe,
+  getDoctors,
 };
