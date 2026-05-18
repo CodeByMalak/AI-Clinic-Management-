@@ -5,7 +5,7 @@ const AuthContext = createContext(null);
 
 // Create axios instance with base URL pointing to our backend API
 export const api = axios.create({
-  baseURL: 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },
